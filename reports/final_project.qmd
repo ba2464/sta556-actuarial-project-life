@@ -8,19 +8,43 @@ format:
     toc: true
     number-sections: true
     embed-resources: true
-jupyter: python3
-execute:
-  echo: true
-  warning: false
 ---
 
 # Introduction
 
+This study investigates how age-specific mortality assumptions influence the expected cost and variability of death-benefit payments in hypothetical term life insurance portfolios. It combines published mortality information, actuarial probability calculations, and Monte Carlo simulation to examine both the average financial obligation and the range of possible aggregate claim outcomes.
+
 ## Background and motivation
+
+Term life insurance provides a death benefit when an insured individual dies during a specified coverage period. For an insurer, the financial obligation depends on whether death occurs during that period and, if so, when the benefit becomes payable. Mortality probabilities therefore affect both the likelihood of a claim and its present value. These relationships make mortality assumptions central to actuarial evaluations of life insurance benefits.
+
+Age-specific life tables offer a structured basis for quantifying mortality risk. The annual probability of death generally changes with attained age and may differ between mortality schedules. By combining annual death and survival probabilities across successive policy years, an actuary can calculate the probability that a benefit will be paid during a term and its expected present value. Such calculations provide an analytical benchmark, but an expected value alone does not reveal how widely total claims might vary across otherwise identical portfolios.
+
+Monte Carlo simulation complements these calculations by generating many possible realizations of policyholder deaths under a specified probability model. The resulting distribution of aggregate discounted death benefits can be examined using its mean, standard deviation, relative variability, and upper-tail percentiles. Comparing simulated results with theoretical calculations also offers a way to assess numerical consistency.
+
+This project uses the 2023 period life table published by the U.S. Social Security Administration (SSA), Office of the Chief Actuary, to investigate mortality-driven claims risk under separate male and female mortality schedules. Because the SSA table describes population mortality rather than the experience of an underwritten insurance portfolio, the study is designed as a controlled actuarial illustration rather than a forecast of actual insurer claims or a calculation of commercial premiums.
 
 ## Research question
 
+The central research question is:
+
+**Under the specified term life insurance assumptions, how do the male and female age-specific mortality schedules in the 2023 SSA period life table affect expected aggregate discounted death-benefit payments, portfolio variability, and upper-tail claims risk?**
+
+To address this question, the analysis considers two hypothetical portfolios that are identical except for the mortality schedule applied. Each portfolio consists of 1,000 independent, identical policies issued at age 40 for a 20-year term. Each policy provides a $100,000 death benefit payable at the end of the year of death, and benefits are discounted using a constant annual effective interest rate of 3%. The mortality probabilities are held fixed at their 2023 period-table values, and 10,000 portfolio outcomes are simulated for each mortality scenario.
+
 ## Project objectives
+
+The overall objective is to develop and apply a reproducible actuarial framework for evaluating how alternative mortality schedules affect the distribution of discounted death-benefit claims under otherwise identical term life insurance assumptions.
+
+The specific objectives are to:
+
+1. **Prepare and validate mortality data** from the published SSA life table, producing an analysis-ready dataset of age-specific male and female mortality probabilities.
+2. **Describe mortality and survival patterns** across age and compare cumulative survival and death probabilities over the 20-year term beginning at age 40.
+3. **Calculate actuarial benefit values**, including the probability of death during the term, the expected present value of a death benefit per policy, and theoretical aggregate claims moments for each portfolio.
+4. **Simulate aggregate discounted claims** for 10,000 portfolios of 1,000 independent policies under each mortality schedule.
+5. **Compare financial risk measures and validate the simulation** using expected aggregate claims, standard deviations, coefficients of variation, empirical 95th percentiles, and comparisons with theoretical benchmarks.
+
+Together, these objectives connect the mortality assumptions to both expected death-benefit costs and the variability of possible portfolio outcomes. The analysis focuses on claims under a simplified probability model; it does not attempt to estimate future mortality improvements, incorporate all features of commercial insurance contracts, or determine market premiums.
 
 # Data Source and Description
 
@@ -33,7 +57,8 @@ The source is a **period life table**, meaning that it describes mortality condi
 
 For transparency and reproducibility, an HTML snapshot of the original SSA table was downloaded from the official website and preserved as `data/raw/ssa_life_table_2023.html`. The original file is retained separately from the processed dataset. A documented Python cleaning procedure extracts the mortality observations, restructures the table, and validates the resulting data before saving the analysis-ready file as `data/processed/ssa_mortality_clean.csv`. This separation allows the data-processing workflow to be reproduced without modifying the original source.
 
-**Official data source:** Social Security Administration, Office of the Chief Actuary. (2026). *Actuarial Life Table: Period Life Table, 2023, as Used in the 2026 Trustees Report*. https://www.ssa.gov/oact/STATS/table4c6.html
+
+The original mortality data are publicly available through the [Social Security Administration's Actuarial Life Table](https://www.ssa.gov/oact/STATS/table4c6.html). The complete source citation is provided in the References section.
 
 ## Variables and unit of observation
 The original SSA mortality table contains age-specific mortality information separately for males and females. Following data cleaning and restructuring, the dataset was organized in long format, with five variables: `age`, `sex`, `qx`, `lx`, and `ex`.
@@ -99,35 +124,9 @@ The preprocessing workflow imports the mortality information from the locally st
 
 The cleaned dataset is loaded into Python as the DataFrame `mortality`, which serves as the common input for the exploratory analysis, actuarial calculations, and subsequent simulation procedures.
 
-```{python}
-from pathlib import Path
-import sys
-import pandas as pd
-import numpy as np
+**Cleaned mortality data (first five observations)**
 
-# Quarto will execute from the project root
-project_root = Path.cwd()
-
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-from src.data import load_clean_mortality
-
-raw_path = (
-    project_root
-    / "data"
-    / "raw"
-    / "ssa_life_table_2023.html"
-)
-
-mortality, rows_removed = load_clean_mortality(raw_path)
-
-print("Cleaned dataset shape:", mortality.shape)
-print("Rows removed:", rows_removed)
-
-display(mortality.head())
-```
-
+{{< include ../results/01_cleaned_preview.qmd >}}
 The cleaning procedure produced a dataset containing **240 observations and five variables**. These observations correspond to the two sex-specific mortality schedules across the 120 single-year ages from 0 to 119.
 
 The cleaning function reported that one row was excluded during preprocessing because its age entry could not be converted to a numeric value. According to the processing logic, this row corresponds to the explanatory footnote at the end of the original SSA table rather than an age-specific mortality observation. Its exclusion is therefore intentional and does not affect the mortality records used in the analysis.
@@ -153,118 +152,9 @@ The assessment considers several dimensions of data quality:
 
 These conditions are particularly important because the actuarial model constructs survival probabilities from products of annual survival factors, $1-q_x$. Missing, duplicated, or invalid mortality probabilities could therefore distort the calculated term death probabilities and the distribution used for the Monte Carlo simulation.
 
-```{python}
+**Results of the data-quality checks**
 
-# Data quality assessment of the cleaned SSA mortality table
-
-from itertools import product
-
-required_columns = ["age", "sex", "qx", "lx", "ex"]
-
-# Expected one record for each age-sex combination
-expected_pairs = set(
-    product(range(120), ["Male", "Female"])
-)
-
-observed_pairs = set(
-    mortality[["age", "sex"]].itertuples(
-        index=False, name=None
-    )
-)
-
-missing_pairs = expected_pairs - observed_pairs
-unexpected_pairs = observed_pairs - expected_pairs
-
-# Missing and duplicate observations
-missing_values = mortality[required_columns].isna().sum()
-duplicate_count = mortality.duplicated(
-    subset=["age", "sex"]
-).sum()
-
-# Numerical and actuarial consistency
-valid_qx = mortality["qx"].between(0, 1).all()
-
-valid_life_values = (
-    mortality["lx"].ge(0).all()
-    and mortality["ex"].ge(0).all()
-)
-
-initial_survivors = mortality.loc[
-    mortality["age"] == 0, "lx"
-]
-
-valid_initial_survivors = (
-    len(initial_survivors) == 2
-    and initial_survivors.eq(100_000).all()
-)
-
-monotone_survivors = all(
-    group["lx"].is_monotonic_decreasing
-    for _, group in (
-        mortality.sort_values("age").groupby("sex")
-    )
-)
-
-# Generate a summary of the checks
-checks = [
-    ("Expected number of observations",
-     len(mortality) == 240,
-     f"{len(mortality)} observations"),
-
-    ("Complete age-sex combinations",
-     len(missing_pairs) == 0
-     and len(unexpected_pairs) == 0,
-     f"{len(missing_pairs)} missing; "
-     f"{len(unexpected_pairs)} unexpected"),
-
-    ("No duplicated age-sex combinations",
-     duplicate_count == 0,
-     f"{duplicate_count} duplicates"),
-
-    ("No missing values",
-     missing_values.sum() == 0,
-     f"{missing_values.sum()} missing values"),
-
-    ("Valid mortality probabilities",
-     valid_qx,
-     "0 <= qx <= 1"),
-
-    ("Nonnegative life-table values",
-     valid_life_values,
-     "lx >= 0 and ex >= 0"),
-
-    ("Initial survivor counts",
-     valid_initial_survivors,
-     "100,000 for each schedule"),
-
-    ("Nonincreasing survivor counts",
-     monotone_survivors,
-     "lx does not increase with age")
-]
-
-quality_df = pd.DataFrame(
-    checks,
-    columns=["Validation check", "Passed", "Details"]
-)
-
-quality_df["Status"] = quality_df["Passed"].map(
-    {True: "PASS", False: "FAIL"}
-)
-
-display(
-    quality_df[
-        ["Validation check", "Status", "Details"]
-    ]
-)
-
-# Stop the analysis if any validation check fails
-if not quality_df["Passed"].all():
-    raise ValueError(
-        "Mortality data failed one or more "
-        "quality checks."
-    )
-
-```
+{{< include ../results/02_quality_checks.qmd >}}
 The computational checks confirmed that the cleaned mortality dataset satisfied the specified structural and numerical validation criteria. All 240 expected age–sex combinations were present, with no duplicated records or missing values in the required variables. The annual death probabilities were within the interval $[0,1]$, while the survivor counts and remaining life expectancies satisfied the imposed nonnegativity requirements. The survivor series also began at 100,000 for each sex and did not increase with age.
 
 These findings indicate that the cleaned data are internally consistent with the structure required for the actuarial calculations. In particular, the completeness of the age–sex combinations ensures that the mortality probabilities for ages 40 through 59 can be retrieved without gaps.
@@ -276,36 +166,13 @@ Exploratory data analysis was conducted to examine the age-specific structure of
 
 The analysis begins with descriptive summaries of the cleaned SSA mortality dataset, followed by a graphical comparison of mortality probabilities across ages. Finally, survival probabilities are calculated over a 20-year period for an individual entering the insurance contract at age 40. These analyses provide the descriptive foundation for the actuarial calculations developed in Section 5.
 
-```{python}
-# Descriptive analysis of the mortality dataset
+**Descriptive summary of the SSA mortality schedules**
 
-summary = mortality.groupby("sex").agg(
-    observations=("age", "count"),
-    minimum_age=("age", "min"),
-    maximum_age=("age", "max"),
-    mean_qx=("qx", "mean"),
-    minimum_qx=("qx", "min"),
-    maximum_qx=("qx", "max")
-)
+{{< include ../results/03_descriptive_summary.qmd >}}
 
-display(summary.round(6))
+**Age-specific probabilities at selected ages**
 
-# Examine mortality assumptions at selected ages
-selected_ages = [0, 20, 40, 50, 60, 80, 100]
-
-selected_mortality = mortality[
-    mortality["age"].isin(selected_ages)
-]
-
-display(
-    selected_mortality.pivot(
-        index="age",
-        columns="sex",
-        values="qx"
-    ).round(6)
-)
-```
-
+{{< include ../results/04_selected_age_mortality.qmd >}}
 The descriptive summary confirms that each mortality schedule contains 120 observations, covering exact ages 0 through 119. The average age-specific mortality probability across these ages is approximately 0.135420 for males and 0.126751 for females.
 
 These averages should be interpreted cautiously because they are unweighted summaries of mortality probabilities across ages rather than population-level annual death probabilities. In particular, the inclusion of extremely old ages, at which annual mortality probabilities are substantially higher, influences the overall averages. Consequently, the selected-age comparisons and graphical mortality patterns provide more meaningful information for the proposed insurance application.
@@ -321,47 +188,7 @@ To examine the mortality patterns more comprehensively, annual death probabiliti
 
 A logarithmic scale was used on the vertical axis because annual death probabilities vary by several orders of magnitude across the age range. This representation makes it possible to examine mortality differences at younger ages while retaining visibility of the substantially higher death probabilities observed at advanced ages. Equal vertical distances on this scale represent equal multiplicative changes rather than equal absolute changes in mortality probability.
 
-```{python}
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-figures_dir = Path("figures")
-figures_dir.mkdir(exist_ok=True)
-
-fig, ax = plt.subplots(figsize=(10, 6))
-
-for sex in ["Male", "Female"]:
-    subset = mortality[
-        mortality["sex"] == sex
-    ].sort_values("age")
-
-    ax.plot(
-        subset["age"],
-        subset["qx"],
-        linewidth=2,
-        label=sex
-    )
-
-ax.set_yscale("log")
-ax.set_xlabel("Exact age (years)")
-ax.set_ylabel("Annual probability of death, qₓ")
-ax.set_title(
-    "Age-Specific Mortality Probabilities\n"
-    "2023 SSA Period Life Table"
-)
-
-ax.legend()
-ax.grid(True, alpha=0.3)
-fig.tight_layout()
-
-fig.savefig(
-    figures_dir / "mortality_by_age.png",
-    dpi=300,
-    bbox_inches="tight"
-)
-
-plt.show()
-```
+![Age-specific probabilities of death by sex in the 2023 SSA period mortality table; logarithmic vertical axis.](../figures/mortality_by_age.png){#fig-age-mortality}
 
 The figure displays a characteristic age-related mortality pattern for both sexes. Annual death probabilities are relatively high at birth, decline sharply during early childhood, and reach their lowest levels during childhood. Mortality probabilities subsequently rise through adolescence and early adulthood, followed by a sustained increase across middle and older ages.
 
@@ -380,74 +207,11 @@ For this reason, the annual SSA mortality probabilities were combined to calcula
 
 Separate survival curves were constructed for males and females to examine how differences in annual mortality accumulate over the 20-year coverage period.
 
-```{python}
-import numpy as np
+**Twenty-year survival and death probabilities from age 40**
 
-entry_age = 40
-term = 20
+{{< include ../results/05_survival_summary.qmd >}}
 
-fig, ax = plt.subplots(figsize=(10, 6))
-
-for sex in ["Male", "Female"]:
-
-    subset = (
-        mortality[mortality["sex"] == sex]
-        .set_index("age")
-        .sort_index()
-    )
-
-    ages = np.arange(entry_age, entry_age + term)
-
-    qx = subset.loc[ages, "qx"].to_numpy()
-
-    survival = np.concatenate([
-        [1.0],
-        np.cumprod(1 - qx)
-    ])
-
-    attained_ages = np.arange(
-        entry_age,
-        entry_age + term + 1
-    )
-
-    ax.plot(
-        attained_ages,
-        survival,
-        linewidth=2,
-        label=sex
-    )
-
-    print(
-        f"{sex}: 20-year survival probability = "
-        f"{survival[-1]:.6f}"
-    )
-
-    print(
-        f"{sex}: 20-year death probability = "
-        f"{1 - survival[-1]:.6f}"
-    )
-
-ax.set_xlabel("Attained age")
-ax.set_ylabel("Probability of survival from age 40")
-ax.set_title(
-    "Twenty-Year Survival Probabilities\n"
-    "Based on 2023 SSA Period Mortality"
-)
-
-ax.set_ylim(0, 1.02)
-ax.legend()
-ax.grid(True, alpha=0.3)
-
-fig.tight_layout()
-
-fig.savefig(
-    figures_dir / "survival_probabilities.png",
-    dpi=300,
-    bbox_inches="tight"
-)
-
-plt.show()
-```
+![Cumulative survival probabilities between ages 40 and 60 under male and female period mortality schedules.](../figures/survival_probabilities.png){#fig-term-survival}
 
 The figure shows that survival probabilities decrease with attained age for both mortality schedules. The decline occurs because each additional policy year introduces another possibility of death, reducing the probability of surviving from the original entry age.
 
@@ -628,31 +392,9 @@ The function also calculates the probability of surviving the entire policy term
 
 The calculated 20-year survival and death probabilities are presented in the following table.
 
-```{python}
+**20-year survival and death probabilities**
 
-from src.life_math import term_death_probabilities
-
-probability_summary = []
-
-for sex in ["Male", "Female"]:
-    _, survival_prob = term_death_probabilities(
-        mortality,
-        sex=sex,
-        entry_age=entry_age,
-        term=term
-    )
-
-    probability_summary.append({
-        "Mortality schedule": sex,
-        "Probability of survival": f"{survival_prob:.4%}",
-        "Probability of death": f"{1 - survival_prob:.4%}"
-    })
-
-probability_df = pd.DataFrame(probability_summary)
-
-display(probability_df.set_index("Mortality schedule"))
-```
-
+{{< include ../results/06_term_death_probabilities.qmd >}}
 Under the SSA 2023 period mortality assumptions, an individual aged 40 has an estimated 10.7504% probability of dying before reaching age 60 under the male mortality schedule, compared with 6.4398% under the female schedule.
 
 The male schedule therefore produces a **4.3106 percentage-point higher probability of death** over the 20-year term.
@@ -741,53 +483,9 @@ The same contractual assumptions are applied independently to the male and femal
 
 The expected present values obtained from the SSA 2023 period mortality schedules are summarized below.
 
-```{python}
-from src.life_math import (
-    term_death_probabilities,
-    term_epv
-)
+**Actuarial expected present values by mortality schedule**
 
-entry_age = 40
-term = 20
-benefit = 100_000
-interest_rate = 0.03
-
-actuarial_results = []
-death_tables = {}
-
-from src.life_math import portfolio_moments
-
-for sex in ["Male", "Female"]:
-
-    death_table, survival_prob = (
-        term_death_probabilities(
-            mortality,
-            sex=sex,
-            entry_age=entry_age,
-            term=term
-        )
-    )
-
-    epv = term_epv(
-        death_table,
-        benefit=benefit,
-        interest_rate=interest_rate
-    )
-
-    death_tables[sex] = death_table
-
-    actuarial_results.append({
-        "Sex": sex,
-        "20-year survival probability": survival_prob,
-        "20-year death probability": 1 - survival_prob,
-        "Expected present value ($)": epv
-    })
-
-results_df = pd.DataFrame(actuarial_results)
-
-display(results_df.round(6))
-```
-
+{{< include ../results/07_individual_epv.qmd >}}
 Under the specified mortality assumptions, the expected discounted death-benefit payment for a 20-year term life insurance policy issued at age 40 is approximately **$7,541.96 under the male mortality schedule**, compared with **$4,478.56 under the female mortality schedule**.
 
 The male mortality schedule therefore produces an expected present value approximately **$3,063.40 higher**, representing an increase of approximately **68.4% relative to the female schedule**.
@@ -940,17 +638,12 @@ The function receives the unconditional death-year probabilities, the probabilit
 
 The `numpy.random.Generator.multinomial()` method is used to generate policyholder counts across the mortality outcome categories. Discounted benefits are then multiplied by the corresponding death counts and summed to obtain aggregate claims for each simulated portfolio.
 
-To ensure reproducibility, the random number generator was initialized using a fixed seed:
-
-```python
-rng = np.random.default_rng(2026)
-```
-
-This enables the simulation results to be reproduced when the same code, inputs, software environment, and random-number generation procedure are used.
+To support reproducibility, the random number generator was initialized using a fixed seed of **2026**. This allows the simulated results to be reproduced when the same code, inputs, software environment, and random-number generation procedure are used.
 
 The simulation is performed separately for the male and female mortality schedules, with 10,000 aggregate claim outcomes generated for each scenario.
 
-### Summary Measures of Portfolio Risk
+
+### Summary Measures of Portfolio Risks
 
 The simulated aggregate claims are summarized using several descriptive and risk-related measures.
 
@@ -998,71 +691,9 @@ The Monte Carlo simulation generated 10,000 possible aggregate discounted claim 
 The simulation results were summarized using the mean, standard deviation, Monte Carlo standard error, and 95th percentile of aggregate discounted claims. These measures provide complementary information about the expected cost, variability, numerical precision, and upper-tail risk associated with each mortality scenario.
 
 ### Summary of Simulated Aggregate Claims
-```{python}
+**Summary of 10,000 simulated portfolios for each mortality schedule**
 
-from src.simulation import simulate_aggregate_claims
-
-rng = np.random.default_rng(2026)
-
-n_policies = 1_000
-n_portfolios = 10_000
-
-simulation_results = {}
-simulation_summary = []
-
-for sex in ["Male", "Female"]:
-
-    death_table = death_tables[sex]
-
-    term_survival = (
-        1.0 - death_table["death_probability"].sum()
-    )
-
-    simulated = simulate_aggregate_claims(
-        death_table=death_table,
-        term_survival=term_survival,
-        n_policies=n_policies,
-        n_portfolios=n_portfolios,
-        benefit=benefit,
-        interest_rate=interest_rate,
-        rng=rng
-    )
-
-    simulation_results[sex] = simulated
-
-    epv = results_df.loc[
-        results_df["Sex"] == sex,
-        "Expected present value ($)"
-    ].iloc[0]
-
-    theoretical_mean = n_policies * epv
-
-    simulated_mean = simulated.mean()
-    simulated_sd = simulated.std(ddof=1)
-    mcse = simulated_sd / np.sqrt(n_portfolios)
-
-    simulation_summary.append({
-        "Sex": sex,
-        "Theoretical mean ($)": theoretical_mean,
-        "Simulated mean ($)": simulated_mean,
-        "Simulation SD ($)": simulated_sd,
-        "Monte Carlo SE ($)": mcse,
-        "95th percentile ($)": np.percentile(
-            simulated, 95
-        )
-    })
-
-simulation_df = pd.DataFrame(simulation_summary)
-
-simulation_df["Coefficient of variation (%)"] = (
-    simulation_df["Simulation SD ($)"]
-    / simulation_df["Simulated mean ($)"]
-    * 100
-)
-
-display(simulation_df.round(2))
-```
-
+{{< include ../results/08_simulation_summary.qmd >}}
 ### Expected Aggregate Claims
 
 The simulated mean aggregate discounted claims were approximately **$7.52 million under the male mortality schedule** and **$4.47 million under the female mortality schedule**.
@@ -1119,68 +750,9 @@ Each histogram displays the frequency of simulated portfolio outcomes across dif
 
 Two reference lines are included in each figure: the theoretical expected aggregate claims, indicated by a dashed line, and the empirical 95th percentile, indicated by a dotted line.
 
-```{python}
-for sex in ["Male", "Female"]:
-
-    simulated = simulation_results[sex]
-
-    theoretical_mean, _ = portfolio_moments(
-        death_tables[sex],
-        benefit,
-        interest_rate,
-        n_policies
-    )
-
-    percentile_95 = np.percentile(simulated, 95)
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Express claims in millions of dollars
-    ax.hist(
-        simulated / 1_000_000,
-        bins=45,
-        alpha=0.75,
-        edgecolor="white"
-    )
-
-    ax.axvline(
-        theoretical_mean / 1_000_000,
-        linestyle="--",
-        linewidth=2,
-        label="Theoretical mean"
-    )
-
-    ax.axvline(
-        percentile_95 / 1_000_000,
-        linestyle=":",
-        linewidth=2,
-        label="95th percentile"
-    )
-
-    ax.set_title(
-        f"Simulated Aggregate Claims — {sex} Mortality"
-    )
-    ax.set_xlabel(
-        "Aggregate present value of claims ($ millions)"
-    )
-    ax.set_ylabel("Number of simulated portfolios")
-
-    ax.legend()
-    ax.grid(alpha=0.2)
-
-    fig.tight_layout()
-
-    fig.savefig(
-        figures_dir /
-        f"aggregate_claims_{sex.lower()}.png",
-        dpi=300,
-        bbox_inches="tight"
-    )
-
-    plt.show()
-```
-
 **Male Mortality Scenario**
+
+![Distribution of simulated aggregate discounted claims: male mortality schedule.](../figures/aggregate_claims_male.png){#fig-claims-male}
 
 The histogram for the male mortality schedule shows a unimodal distribution of simulated aggregate claims, with most outcomes concentrated around the expected claims amount of approximately $7.54 million.
 
@@ -1191,6 +763,8 @@ The empirical 95th percentile of approximately $8.67 million lies to the right o
 The dispersion around the mean demonstrates that, even for a homogeneous portfolio of 1,000 independent policies, the total present value of death benefits is subject to considerable uncertainty.
 
 **Female Mortality Scenario**
+
+![Distribution of simulated aggregate discounted claims: female mortality schedule.](../figures/aggregate_claims_female.png){#fig-claims-female}
 
 The histogram for the female mortality schedule also displays a unimodal, approximately bell-shaped distribution, centered around the theoretical expected claims amount of approximately $4.48 million.
 
@@ -1283,47 +857,9 @@ The calculations were implemented through the reusable Python function `portfoli
 
 The theoretical aggregate means and standard deviations were compared with the corresponding estimates obtained from 10,000 Monte Carlo portfolio replications for each mortality scenario.
 
-```{python}
-from src.life_math import portfolio_moments
+**Comparison of theoretical and simulated portfolio moments**
 
-validation_results = []
-
-for sex in ["Male", "Female"]:
-
-    death_table = death_tables[sex]
-    simulated = simulation_results[sex]
-
-    theoretical_mean, theoretical_sd = portfolio_moments(
-        death_table=death_table,
-        benefit=benefit,
-        interest_rate=interest_rate,
-        n_policies=n_policies
-    )
-
-    simulated_mean = simulated.mean()
-    simulated_sd = simulated.std(ddof=1)
-
-    theoretical_mcse = (
-        theoretical_sd / np.sqrt(n_portfolios)
-    )
-
-    standardized_error = (
-        simulated_mean - theoretical_mean
-    ) / theoretical_mcse
-
-    validation_results.append({
-        "Sex": sex,
-        "Theoretical mean": theoretical_mean,
-        "Simulated mean": simulated_mean,
-        "Theoretical SD": theoretical_sd,
-        "Simulated SD": simulated_sd,
-        "Mean error (MCSE units)": standardized_error
-    })
-
-validation_df = pd.DataFrame(validation_results)
-
-display(validation_df.round(3))
-```
+{{< include ../results/10_numerical_validation.qmd >}}
 Under the male mortality schedule, the theoretical expected aggregate discounted claims were approximately **$7,541,956**, while the simulated mean was approximately **$7,524,475**.
 
 The simulated mean was therefore approximately $17,481 below its theoretical counterpart, representing a relative difference of approximately 0.23%.
@@ -1428,8 +964,204 @@ Within these boundaries, the theoretical and simulated results provide a coheren
 
 # Results and Discussion
 
+This section integrates the findings from the exploratory analysis, actuarial calculations, and Monte Carlo simulation to assess the financial implications of mortality-driven risk in hypothetical term life insurance portfolios. The discussion focuses on how differences in the assumed mortality schedules affect expected discounted claims, portfolio variability, and the potential for adverse claims outcomes.
+
+## Summary of Principal Findings
+
+The analysis demonstrates that differences in age-specific mortality probabilities translate into substantial differences in the financial characteristics of otherwise identical term life insurance portfolios.
+
+Under the 2023 SSA period mortality schedules, the probability that an individual aged 40 dies during the subsequent 20 years is approximately **10.75% under the male schedule** and **6.44% under the female schedule**. This difference is reflected in the actuarial expected present values of death benefits, which are approximately **$7,541.96** and **$4,478.56** per policy, respectively.
+
+For a hypothetical portfolio of 1,000 identical policies, the corresponding theoretical expected aggregate discounted claims are approximately **$7.54 million under the male schedule** and **$4.48 million under the female schedule**.
+
+The Monte Carlo simulation produced similar results, with average aggregate claims of approximately $7.52 million and $4.47 million for the male and female scenarios, respectively.
+
+These findings establish a consistent relationship between the mortality assumptions and expected financial outcomes: the scenario with higher mortality probabilities also produces a higher expected present value of death-benefit payments.
+
+Importantly, the comparison is based on two hypothetical portfolios that differ only in their assumed mortality schedules. The results therefore illustrate the financial implications of these specified mortality assumptions rather than differences observed between actual insurance portfolios.
+
+## Implications for Expected Insurance Claims
+
+The actuarial expected present value provides a measure of the average discounted death-benefit obligation associated with a policy under specified mortality and financial assumptions.
+
+The male mortality schedule produces an expected present value approximately **68.4% higher** than the female schedule. This difference reflects the higher probability of a death-benefit payment and the distribution of potential payments across the 20-year insurance term.
+
+The results also demonstrate why the probability of death during the term is not sufficient by itself to determine the expected financial cost of the insurance benefit. Two mortality schedules may generate different patterns in the timing of deaths, which influence present values because death benefits are discounted according to the policy year in which they are paid.
+
+From an actuarial perspective, these calculations illustrate the role of mortality assumptions in estimating future benefit obligations and establishing a foundation for insurance valuation and pricing analysis.
+
+However, the expected present values calculated in this study represent only the discounted cost of death benefits. They do not include expenses, premium payment patterns, lapses, profit provisions, or other components necessary to determine commercial insurance premiums.
+
+Consequently, the numerical results should be interpreted as model-based expected benefit costs rather than recommended insurance prices.
+
+## Portfolio Variability and Upper-Tail Risk
+
+Although expected claims provide an important measure of the central tendency of aggregate insurance payments, they do not describe the full range of possible financial outcomes.
+
+The Monte Carlo simulation demonstrates that aggregate discounted claims can vary substantially across hypothetical portfolios, even when the mortality probabilities, policy characteristics, and discount rate remain unchanged.
+
+The male portfolio has a simulated standard deviation of approximately **$693,675**, compared with **$545,481** for the female portfolio. Thus, the male mortality scenario exhibits greater variability in absolute dollar terms.
+
+The relative comparison, however, differs. The simulated coefficients of variation are approximately **9.22% for males** and **12.20% for females**. This indicates that although the female portfolio has lower average claims and lower absolute variability, its claims are more variable relative to their expected level.
+
+This distinction is important when comparing insurance portfolios with different expected claims. A portfolio with a smaller expected liability does not necessarily exhibit a smaller proportionate departure from its mean.
+
+The upper tails of the simulated distributions provide further insight into adverse mortality outcomes. The empirical 95th percentile of aggregate discounted claims is approximately **$8.67 million for the male portfolio** and **$5.39 million for the female portfolio**.
+
+These thresholds indicate the approximate levels exceeded by 5% of simulated portfolio outcomes under each mortality scenario. In both cases, the thresholds are meaningfully above the simulated means, demonstrating that claims can be substantially higher than expected even under the simplified assumptions of the model.
+
+The findings illustrate the importance of evaluating aggregate insurance risk using multiple measures. Expected claims describe the average financial obligation, standard deviations describe absolute variability, coefficients of variation describe relative variability, and upper-tail percentiles characterize potentially adverse outcomes.
+
+Nevertheless, the empirical percentiles are conditional on the specified simulation model. They should not be interpreted as regulatory capital requirements or as definitive predictions of an insurer's future claims.
+
+## Numerical Reliability and Overall Interpretation
+
+The credibility of a simulation-based analysis depends partly on whether the simulation produces results consistent with the probability model from which it was constructed.
+
+To evaluate numerical consistency, the simulated means and standard deviations were compared with their theoretical counterparts.
+
+The simulated means differed from the theoretical expectations by approximately **0.23% for males** and **0.16% for females**, while the simulated standard deviations differed from their theoretical values by less than 1% in both scenarios.
+
+These relatively small differences indicate that the simulation reproduces the general scale of aggregate claims and their variability under the assumed mortality model.
+
+However, the standardized Monte Carlo errors provide an important qualification. The female simulated mean has a standardized error of approximately **−1.341**, which lies within the conventional 95% normal-reference range. The corresponding male value is approximately **−2.502**, which lies outside that range.
+
+The male discrepancy is therefore somewhat unusual for a single simulation run and should not be dismissed solely because its percentage difference is small. At the same time, one such result does not establish that the simulation is systematically biased. Independent simulation runs could provide further evidence about its numerical stability.
+
+A further distinction is necessary between the uncertainty in the simulated mean and the variability of aggregate claims themselves. Increasing the number of simulation replications can improve the precision of Monte Carlo estimates, but it does not reduce the mortality-driven variability inherent in a portfolio containing 1,000 policies.
+
+Taken together, the findings demonstrate that mortality assumptions affect not only the expected present value of life insurance benefits but also the distribution of aggregate discounted claims.
+
+The combination of analytical actuarial calculations and Monte Carlo simulation provides a useful framework for evaluating these effects. The analytical approach establishes expected values and theoretical measures of variability, while simulation provides a practical means of examining the distribution of potential aggregate outcomes and estimating upper-tail risk.
+
+The conclusions remain conditional on the mortality schedules, contract specifications, and independence assumptions adopted in this study. They should therefore be interpreted as the results of a controlled actuarial risk simulation rather than direct estimates of the claims experience of an actual insurance company.
+
 # Limitations
+
+Although the actuarial calculations and Monte Carlo simulation provide useful insights into mortality-driven term life insurance risk, the findings are subject to several limitations. These arise primarily from the mortality assumptions, the simplified structure of the hypothetical insurance portfolios, the financial assumptions, and the scope of the simulation.
+
+The limitations discussed below are important when interpreting the results and assessing their applicability to actual insurance operations.
+
+## Mortality Assumptions and Model Uncertainty
+
+The analysis relies on the 2023 Social Security Administration (SSA) period life table, with the published annual mortality probabilities treated as fixed inputs throughout the 20-year insurance term.
+
+This approach does not incorporate future improvements or deteriorations in mortality. Consequently, the projected probabilities of death and expected discounted claims may differ from those obtained using mortality assumptions that vary over calendar time. The model also does not account for uncertainty in the estimated mortality rates themselves.
+
+Furthermore, as discussed in Section 2.3, the SSA life table represents population mortality rather than the experience of an individually underwritten insurance portfolio. Differences in health status, underwriting selection, and other risk characteristics may limit the applicability of the results to commercial life insurance.
+
+The model therefore measures the financial consequences of mortality under specified assumptions, rather than estimating the full range of uncertainty associated with future insured mortality.
+
+## Portfolio Homogeneity and Independence
+
+The simulated portfolios consist of 1,000 identical term life insurance policies. All policyholders enter the contract at age 40, receive the same death benefit, and are assigned the same age-specific mortality probabilities within each scenario.
+
+Actual life insurance portfolios are generally more heterogeneous. Policyholders may differ in age, health status, coverage amount, policy duration, and other characteristics. Such differences can affect both the expected value and the variability of aggregate claims.
+
+An additional limitation is the assumption that mortality outcomes are independent across policyholders. This assumption simplifies the model and permits the use of multinomial simulation to generate the distribution of policyholder outcomes.
+
+However, real-world mortality outcomes may be influenced by shared events, including pandemics, natural disasters, and other widespread adverse conditions. These events can produce dependence among insured lives.
+
+By excluding common mortality shocks and other sources of dependence, the model does not capture the full range of potentially adverse outcomes that may arise in actual insurance portfolios. In particular, the resulting claim distribution may understate upper-tail risk when positively correlated mortality outcomes are important.
+
+## Financial and Contractual Simplifications
+
+The study assumes a constant annual effective interest rate of 3% throughout the coverage period. Although this provides a consistent basis for discounting death-benefit payments, actual interest rates and investment conditions may change over time.
+
+Changes in interest rates affect the present value of future benefit obligations. The analysis does not investigate how alternative interest-rate assumptions would influence expected discounted claims or aggregate claims variability.
+
+The model also assumes that death benefits are paid at the end of the policy year in which death occurs. In practice, the timing of death-benefit payments may differ from this convention. Alternative payment timing assumptions would change the present values of the benefits.
+
+Furthermore, the analysis excludes policy lapses, surrenders, premium payments, operating expenses, commissions, and other contractual or financial features relevant to commercial life insurance.
+
+Consequently, the expected present values calculated in this project represent the discounted cost of modeled death benefits rather than complete insurance premiums or the total financial liabilities of an insurance company.
+
+These simplifications are appropriate for isolating mortality-driven claim risk but limit the direct application of the results to commercial product pricing and financial management.
+
+## Simulation and Risk Measurement Limitations
+
+The Monte Carlo analysis is based on 10,000 simulated portfolios for each mortality scenario. Although this provides a substantial number of replications for estimating aggregate claim characteristics, the resulting statistics remain subject to Monte Carlo sampling variability.
+
+This limitation is particularly relevant when estimating quantities in the tails of a distribution, where relatively few simulated outcomes determine the reported percentiles.
+
+The numerical validation in Section 6.3 also demonstrates that simulated estimates need not agree exactly with their theoretical counterparts. In particular, the male simulated mean exhibited a standardized Monte Carlo error of approximately −2.502, indicating a somewhat unusual deviation under the normal approximation.
+
+The study therefore provides evidence of numerical consistency but does not establish that the simulation estimates are free from Monte Carlo uncertainty.
+
+Additionally, the analysis uses the empirical 95th percentile of aggregate discounted claims as its primary upper-tail risk measure. While this statistic provides information about relatively adverse outcomes, it does not describe the average severity of losses beyond the 95th-percentile threshold.
+
+The reported percentile also excludes other sources of insurance risk, including mortality parameter uncertainty, investment risk, and changes in policyholder behavior.
+
+Therefore, the upper-tail estimates should be interpreted as descriptive measures of the simulated claim distributions rather than regulatory capital requirements or comprehensive measures of insurer solvency risk.
+
+## Directions for Future Research
+
+Several extensions could improve the realism and practical applicability of the model.
+
+Future research could incorporate projected mortality improvements and investigate the sensitivity of expected claims to alternative mortality assumptions. A heterogeneous insurance portfolio could also be constructed by allowing policyholders to differ in age, coverage amount, and other relevant characteristics.
+
+Introducing common mortality shocks or dependence between policyholders would provide a more comprehensive assessment of aggregate claim risk, particularly in adverse mortality scenarios.
+
+Additional extensions could examine alternative interest-rate assumptions, incorporate lapses and premium cash flows, and compare different benefit payment conventions.
+
+Finally, further simulation experiments could assess the numerical stability of upper-tail estimates using additional replications and alternative risk measures, such as expected shortfall.
+
+These extensions would allow the analysis to move beyond a simplified illustration of mortality-driven risk toward a more comprehensive framework for evaluating life insurance portfolio outcomes.
 
 # Conclusion
 
+This study investigated how differences in mortality assumptions influence the expected financial obligations and aggregate claims risk of hypothetical term life insurance portfolios. Using the 2023 U.S. Social Security Administration (SSA) period life table, actuarial probability calculations and Monte Carlo simulation were combined to evaluate 20-year term life insurance contracts issued at age 40, with a death benefit of $100,000 and an annual effective interest rate of 3%.
+
+The findings demonstrate that differences in age-specific mortality probabilities have substantial implications for insurance claims. The probability of death during the 20-year coverage period was approximately 10.75% under the male mortality schedule, compared with 6.44% under the female schedule. These differences translated into theoretical expected aggregate discounted claims of approximately $7.54 million and $4.48 million, respectively, for portfolios containing 1,000 identical policies.
+
+The Monte Carlo analysis further demonstrated that expected claims alone do not fully characterize portfolio risk. Across 10,000 simulated portfolios per mortality scenario, the mean aggregate discounted claims were approximately $7.52 million for males and $4.47 million for females. The empirical 95th-percentile claims were approximately $8.67 million and $5.39 million, respectively, illustrating the potential for aggregate claims to exceed their expected levels. Although the male scenario exhibited greater variability in absolute monetary terms, the female scenario had greater variability relative to its expected claims.
+
+Comparisons between theoretical and simulated portfolio moments provided evidence of broad numerical consistency. The simulated means and standard deviations were close to their analytical counterparts in relative terms. However, the standardized Monte Carlo error for the male simulated mean exceeded the conventional 95% normal-reference range, highlighting the importance of acknowledging simulation uncertainty rather than assuming exact agreement between analytical and simulated results.
+
+The study illustrates the value of combining actuarial mathematics with computational simulation to examine mortality-driven insurance risk. Analytical calculations provide a theoretical foundation for estimating expected benefit obligations, while Monte Carlo simulation allows the distribution of potential aggregate claims, including relatively adverse outcomes, to be examined.
+
+Nevertheless, the findings remain conditional on the specified SSA period mortality schedules, the assumption of independent and homogeneous policyholders, and the simplified financial and contractual structure. Consequently, the results should be interpreted as an illustration of mortality-driven insurance risk rather than direct predictions of commercial insurance claims or complete insurance premiums.
+
+Overall, the project demonstrates how a reproducible Python-based actuarial framework can transform published mortality information into quantitative measures of expected claims, portfolio variability, and upper-tail risk. These methods provide a foundation for more comprehensive actuarial applications incorporating heterogeneous portfolios, evolving mortality assumptions, and additional sources of insurance risk.
+
 # Reproducibility
+
+The project was organized to separate the computational analysis from the written report. Python code is maintained in Jupyter notebooks and supporting Python modules, while the Quarto report presents the methodology, mathematical framework, generated tables, figures, and interpretations without executable code. All reported calculations use a locally preserved copy of the 2023 Social Security Administration (SSA) period life table.
+
+## Project Organization and Computational Environment
+
+The original SSA HTML snapshot is stored in `data/raw/ssa_life_table_2023.html`, and the cleaned long-format data are saved as `data/processed/ssa_mortality_clean.csv`. The analysis notebooks are stored in `notebooks/`; shared functions for data processing, actuarial mathematics, and simulation are stored in `src/data.py`, `src/life_math.py`, and `src/simulation.py`, respectively. The analysis generates report-ready tables in `results/` and figures in `figures/`. The Quarto source is stored in `reports/final_project.qmd`.
+
+The computational workflow uses Python with NumPy, pandas, Matplotlib, and supporting packages. The project includes a `requirements.txt` file listing its dependencies, although this file does not pin exact package versions. Reproduction requires the listed packages, a functioning Python/Jupyter environment, and access to the supplied source data and supporting modules.
+
+## Notebook Workflow
+
+The computational work is distributed across five notebooks, which can be run in the following order:
+
+| Notebook | Role in the workflow |
+|---|---|
+| `01_data_extraction_and_cleaning.ipynb` | Inspects the original SSA HTML table, demonstrates extraction and cleaning, and saves a cleaned CSV. |
+| `02_data_preparation_validation.ipynb` | Repeats the reproducible cleaning step, performs formal data-quality checks, and exports the validation tables used in the report. |
+| `03_exploratory_analysis.ipynb` | Produces the descriptive mortality tables, age-specific mortality graph, and 20-year survival graph. |
+| `04_actuarial_calculations.ipynb` | Calculates term survival and death probabilities and expected present values of death benefits. |
+| `05_monte_carlo_validation.ipynb` | Simulates aggregate discounted claims, generates the portfolio distributions, and compares simulated moments with analytical benchmarks. |
+
+The first two notebooks both include data-cleaning operations; the second supplies the formal validation outputs used in the report. The later notebooks use the cleaned mortality file to generate the remaining analytical results. Running the notebooks in the listed order updates the CSV, the nine report tables, and the four figures. The Quarto report can then be rendered separately from its source file, using these generated outputs.
+
+## Simulation Reproducibility and Numerical Checks
+
+The Monte Carlo simulation uses a fixed random seed of **2026**, 10,000 simulated portfolios for each mortality schedule, and 1,000 independent policies per portfolio. Within the simulation notebook, the same initialized random-number generator is used for the male and female scenarios in a specified execution order. Reproducing the exact sequence of simulated results therefore depends on retaining that order, the inputs, and a compatible numerical computing environment.
+
+The workflow checks that the cleaned mortality data contain the expected age–sex records, no missing or duplicate observations, valid death probabilities, and consistent life-table survivor counts. In addition, the simulated means and standard deviations are compared with theoretical portfolio moments, and standardized Monte Carlo errors are reported. These checks make calculation errors easier to detect, although they do not eliminate simulation sampling variability or uncertainty in the assumed mortality rates.
+
+## Scope of Reproducibility
+
+The generated tables and figures can be refreshed by rerunning the notebooks. If the mortality data, model assumptions, or computational procedures are changed, numerical values written directly into the report must also be reviewed before rendering the final document.
+
+This workflow supports computational reproduction of the results under the stated assumptions. It does not establish that the population mortality schedule is representative of an actual underwritten insurance portfolio or that the simulated results predict future insurer claims experience.
+
+
+# References {.unnumbered}
+
+Social Security Administration, Office of the Chief Actuary. (2026). *Actuarial life table: Period life table, 2023, as used in the 2026 Trustees Report*. [https://www.ssa.gov/oact/STATS/table4c6.html](https://www.ssa.gov/oact/STATS/table4c6.html)
+

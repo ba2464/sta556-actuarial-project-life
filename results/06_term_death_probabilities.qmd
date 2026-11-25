@@ -1,0 +1,4 @@
+| Mortality schedule   | Probability of survival   | Probability of death   |
+|:---------------------|:--------------------------|:-----------------------|
+| Male                 | 89.2496%                  | 10.7504%               |
+| Female               | 93.5602%                  | 6.4398%                |

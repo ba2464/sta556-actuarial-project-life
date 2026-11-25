@@ -1,0 +1,10 @@
+| Validation check                   | Status   | Details                       |
+|:-----------------------------------|:---------|:------------------------------|
+| Expected number of observations    | PASS     | 240 observations              |
+| Complete age-sex combinations      | PASS     | 0 missing; 0 unexpected       |
+| No duplicated age-sex combinations | PASS     | 0 duplicates                  |
+| No missing values                  | PASS     | 0 missing values              |
+| Valid mortality probabilities      | PASS     | 0 <= qx <= 1                  |
+| Nonnegative life-table values      | PASS     | lx >= 0 and ex >= 0           |
+| Initial survivor counts            | PASS     | 100,000 for each schedule     |
+| Nonincreasing survivor counts      | PASS     | lx does not increase with age |
