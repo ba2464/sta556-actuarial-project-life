@@ -1,0 +1,8 @@
+| Measure                      |         Male |       Female |
+|:-----------------------------|-------------:|-------------:|
+| Theoretical mean (USD)       | 7,541,955.57 | 4,478,555.18 |
+| Simulated mean (USD)         | 7,524,475.04 | 4,471,203.68 |
+| Simulation SD (USD)          |   693,674.57 |   545,481.31 |
+| Monte Carlo SE (USD)         |     6,936.75 |     5,454.81 |
+| 95th percentile (USD)        | 8,670,598.66 | 5,392,666.48 |
+| Coefficient of variation (%) |         9.22 |        12.20 |
