@@ -1,2 +1,11 @@
 /.quarto/
 **/*.quarto_ipynb
+# Python environments
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
